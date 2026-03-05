@@ -14,8 +14,10 @@
 # actually, I will just do all of that for you - since this is likely only for me anyway.
 # This is dual-action for me; it helps my openvpn access server work alongside wireguard and also circumvent rate limiting with opencode.
 # I hope nobody important at opencode/MiniMax sees this, eventually I will have to get craftier to escape them.
+# You can daemonize it or put a nohup in your .bashrc or however you like to run it, up to you.
 
 # CHANGE BELOW TO ADAPT TO YOUR SETUP #
+
 oc_lives_here="/home/services/.opencode/bin/opencode"
 where="/etc/netns/opencode/wireguard" # this is where your WG configs live. I would put them in the ns
 ns="opencode" #the namespace you set up to hide opencode in
