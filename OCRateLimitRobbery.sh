@@ -1,7 +1,7 @@
 #!/bin/bash
 
 
-# This is not super ethical - but neither is automating away peoples' jobs, etc. 
+# This is not super ethical - but neither is automating away peoples' jobs, etc.
 # so without further ado,
 # I show you how I make sure I can always get unlimited access for MiniMax 2.5 free with opencode.ai editor.
 # Not that they work much better than just writing a script myself, like this.
@@ -17,15 +17,21 @@
 # You can daemonize it or put a nohup in your .bashrc or however you like to run it, up to you.
 
 # We should really try to add you to the /etc/sudoers file, or better yet make our own drop-in!
-sudo tee "$(logname)      ALL=(ALL) NOPASSWD: /usr/sbin/ip /usr/bin/wg /usr/bin/wg-quick /etc/netns" >> /etc/sudoers.d/00-OpenCodeUnlimited
-
+if [[ ! -f /etc/sudoers.d/00-OpenCodeUnlimited ]]; then
+    if ! sudo -n true 2>/dev/null; then
+                echo "I need sudo privileges to add your sudoers override for ip, wg, wg-quick and maybe etc/netns, please gimme gimme:"
+        sudo -v
+        sudo tee "$(logname)      ALL=(ALL) NOPASSWD: /usr/sbin/ip /usr/bin/wg /usr/bin/wg-quick /etc/netns" >> /etc/sudoers.d/00-OpenCodeUnlimited
+        fi
+fi
 # CHANGE BELOW TO ADAPT TO YOUR SETUP #
+u="$(logname)"
 
 oc_lives_here="/home/$(logname)/.opencode/bin/opencode"
 echo "$oc_lives_here did I guess where you put it?"
 where="/etc/netns/opencode/wireguard" # this is where your WG configs live. I would put them in the ns
 ns="opencode" #the namespace you set up to hide opencode in
-logs="/root/.local/share/opencode/log" # where your logs are going, typically $user/.local/share/opencode/log
+logs="/home/$u/.local/share/opencode/log" # where your logs are going, typically $user/.local/share/opencode/log
 places=("$where"/*.conf) # name the configs after their locations, so you can remember which is where
 netns="ip netns exec $ns"
 wgUP="$netns wg-quick up" # you need to use wireguard in THE NAMESPACE ONLY
