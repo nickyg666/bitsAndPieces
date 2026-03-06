@@ -10,45 +10,43 @@
 # this is built to play nicely with systemd/resolved and the rest of your system
 # that you may or may not want to be tunnelled.
 # make sure you put this in your .bashrc to replace the export PATH=".opencode/bin/opencode"
-# alias opencode='ip netns exec $ns ~/.opencode/bin/opencode'
+# alias opencode='nsenter --net=/var/run/netns/opencode ~/.opencode/bin/opencode'
 # actually, I will just do all of that for you - since this is likely only for me anyway.
 # This is dual-action for me; it helps my openvpn access server work alongside wireguard and also circumvent rate limiting with opencode.
 # I hope nobody important at opencode/MiniMax sees this, eventually I will have to get craftier to escape them.
 # You can daemonize it or put a nohup in your .bashrc or however you like to run it, up to you.
 u="$(logname)"
-f="/etc/sudoers.d/00-opencodeUnlimited"
-# We should really try to add you to the /etc/sudoers file, or better yet make our own drop-in!
-if [[ ! -f "$f" ]]; then
-    echo "I need sudo privileges to add your sudoers override for ip, wg, wg-quick, etc please gimme gimme:"
-    sudo -v || exit 1
-    echo "$u ALL=(root) NOPASSWD: /usr/sbin/ip, /usr/bin/wg, /usr/bin/wg-quick, /usr/bin/resolvctl" | sudo tee "$f" >/dev/null
-    sudo chmod 440 "$f"
-fi
+sudo setcap cap_sys_admin,cap_net_admin+ep /usr/bin/ip
+sudo setcap cap_net_admin+ep,cap_sys_admin /usr/bin/nsenter
 # CHANGE BELOW TO ADAPT TO YOUR SETUP #
 
 
-oc_lives_here="/home/$(logname)/.opencode/bin/opencode"
+oc_lives_here="/home/$u/.opencode/bin/opencode"
 where="/etc/netns/opencode/wireguard" # this is where your WG configs live. I would put them in the ns
 ns="opencode" #the namespace you set up to hide opencode in
 logs="/home/$u/.local/share/opencode/log" # where your logs are going, typically $user/.local/share/opencode/log
 places=("$where"/*.conf) # name the configs after their locations, so you can remember which is where
-netns="sudo ip netns exec $ns"
+netns="nsenter --net=/var/run/netns/$ns"
 wgUP="$netns wg-quick up" # you need to use wireguard in THE NAMESPACE ONLY
 wgDN="$netns wg-quick down"
 
-# we will check for or set up a separate namespace for you quick.
+# we will check for or set up a separate namespace for you quick - so we can hide real good without hiding everything all at once
 if ! sudo ip netns list | grep -q "^$ns"; then
 
     sudo ip netns add $ns
+    sudo chown "$u":"$u" /var/run/netns/$ns
     sudo ip link add veth-host type veth peer name veth-ns
     sudo ip link set veth-ns netns $ns
     sudo ip addr add 123.123.123.1/24 dev veth-host
     $netns ip addr add 123.123.123.2/24 dev veth-ns
     $netns ip link set lo up
     $netns ip link set veth-ns up
+    sudo ip link set veth-host up
     $netns ip route add default via 123.123.123.1
 
 fi
+
+
 
 OC_roaming="alias opencode='$netns $oc_lives_here'"
 grep -qxF "$OC_roaming" ~/.bashrc || echo -e "\n$OC_roaming" >> ~/.bashrc
@@ -78,8 +76,7 @@ else
 
 fi
 #log watcher
-tail -Fn0 "$logs/*.log"| while read -r line; do
-    if echo "$line" | grep -qiE "rate limit|quota|exceeded|too many|retrying"; then
+if tail -Fn0 "$logs"/* | grep --line-buffered -iE "rate limit|quota|exceeded|too many|retrying"; then
 
         if [[ "$hidingIn" == "PlainSight" ]]; then
 
