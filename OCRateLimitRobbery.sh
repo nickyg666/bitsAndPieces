@@ -1,5 +1,5 @@
 #!/bin/bash
-
+#TODO: fix routing, I forgot to add in the routing, so you don't get any DNS in that namespace.
 
 # This is not super ethical - but neither is automating away peoples' jobs, etc.
 # so without further ado,
