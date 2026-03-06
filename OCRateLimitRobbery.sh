@@ -77,14 +77,14 @@ else
 
 fi
 #log watcher
-tail -Fn0 "$logs"/*.log | while read -r line; do
+tail -Fn0 "$logs"/*.log 2>/dev/null | while read -r line; do
     if echo "$line" | grep -qiE "rate limit|quota|exceeded|too many|retrying"; then
 
         if [[ "$hidingIn" == "PlainSight" ]]; then
 
             hideBetter=true
             $wgUP "${places[0]}" # up the first config after you get rate limited!
-            hidingIn="$(basename "{places[0]}")"
+            hidingIn="$(basename "${places[0]}")"
             hideBetter=false
 
         else
@@ -95,14 +95,13 @@ tail -Fn0 "$logs"/*.log | while read -r line; do
 
                 if [[ "$hideBetter" == true ]]; then
 
-                    $wgUP "$where/$x";
-                    hidingIn="$x";
+                    $wgUP "$x";
+                    hidingIn="$(basename "$x")";
                     hideBetter=false
                     break;
-
                 fi
 
-                [[ "$(basename $x)" == "$(basename $hidingIn)" ]] && hideBetter=true && continue
+                [[ "$(basename "$x")" == "$hidingIn" ]] && hideBetter=true && continue
 
             done
 
