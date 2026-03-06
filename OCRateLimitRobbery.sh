@@ -10,30 +10,34 @@
 # this is built to play nicely with systemd/resolved and the rest of your system
 # that you may or may not want to be tunnelled.
 # make sure you put this in your .bashrc to replace the export PATH=".opencode/bin/opencode"
-# alias opencode='sudo ip netns exec $ns ~/.opencode/bin/opencode'
+# alias opencode='ip netns exec $ns ~/.opencode/bin/opencode'
 # actually, I will just do all of that for you - since this is likely only for me anyway.
 # This is dual-action for me; it helps my openvpn access server work alongside wireguard and also circumvent rate limiting with opencode.
 # I hope nobody important at opencode/MiniMax sees this, eventually I will have to get craftier to escape them.
 # You can daemonize it or put a nohup in your .bashrc or however you like to run it, up to you.
 
+# We should really try to add you to the /etc/sudoers file, or better yet make our own drop-in!
+sudo tee "$(logname)      ALL=(ALL) NOPASSWD: /usr/sbin/ip /usr/bin/wg /usr/bin/wg-quick /etc/netns" >> /etc/sudoers.d/00-OpenCodeUnlimited
+
 # CHANGE BELOW TO ADAPT TO YOUR SETUP #
 
-oc_lives_here="/home/services/.opencode/bin/opencode"
+oc_lives_here="/home/$(logname)/.opencode/bin/opencode"
+echo "$oc_lives_here did I guess where you put it?"
 where="/etc/netns/opencode/wireguard" # this is where your WG configs live. I would put them in the ns
 ns="opencode" #the namespace you set up to hide opencode in
 logs="/root/.local/share/opencode/log" # where your logs are going, typically $user/.local/share/opencode/log
 places=("$where"/*.conf) # name the configs after their locations, so you can remember which is where
-netns="sudo ip netns exec $ns"
+netns="ip netns exec $ns"
 wgUP="$netns wg-quick up" # you need to use wireguard in THE NAMESPACE ONLY
 wgDN="$netns wg-quick down"
 
 # we will check for or set up a separate namespace for you quick.
-if ! sudo ip netns list | grep -q "^$ns"; then
+if ! ip netns list | grep -q "^$ns"; then
 
-    sudo ip netns add $ns
-    sudo ip link add veth-host type veth peer name veth-ns
-    sudo ip link set veth-ns netns $ns
-    sudo ip addr add 123.123.123.1/24 dev veth-host
+    ip netns add $ns
+    ip link add veth-host type veth peer name veth-ns
+    ip link set veth-ns netns $ns
+    ip addr add 123.123.123.1/24 dev veth-host
     $netns ip addr add 123.123.123.2/24 dev veth-ns
     $netns ip link set lo up
     $netns ip link set veth-ns up
