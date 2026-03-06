@@ -17,7 +17,7 @@
 # You can daemonize it or put a nohup in your .bashrc or however you like to run it, up to you.
 u="$(logname)"
 sudo setcap cap_sys_admin,cap_net_admin+ep /usr/bin/ip
-sudo setcap cap_net_admin+ep,cap_sys_admin /usr/bin/nsenter
+sudo setcap cap_sys_admin,cap_net_admin+ep /usr/bin/nsenter
 # CHANGE BELOW TO ADAPT TO YOUR SETUP #
 
 
@@ -43,6 +43,7 @@ if ! sudo ip netns list | grep -q "^$ns"; then
     $netns ip link set veth-ns up
     sudo ip link set veth-host up
     $netns ip route add default via 123.123.123.1
+    sudo ip route add 123.123.123.0/24 dev veth-host
 
 fi
 
@@ -76,13 +77,14 @@ else
 
 fi
 #log watcher
-if tail -Fn0 "$logs"/* | grep --line-buffered -iE "rate limit|quota|exceeded|too many|retrying"; then
+tail -Fn0 "$logs"/*.log | while read -r line; do
+    if echo "$line" | grep -qiE "rate limit|quota|exceeded|too many|retrying"; then
 
         if [[ "$hidingIn" == "PlainSight" ]]; then
 
             hideBetter=true
             $wgUP "${places[0]}" # up the first config after you get rate limited!
-            hidingIn=${places[0]}
+            hidingIn="$(basename "{places[0]}")"
             hideBetter=false
 
         else
@@ -100,7 +102,7 @@ if tail -Fn0 "$logs"/* | grep --line-buffered -iE "rate limit|quota|exceeded|too
 
                 fi
 
-                [[ "$x" == "$hidingIn" ]] && hideBetter=true && continue
+                [[ "$(basename $x)" == "$(basename $hidingIn)" ]] && hideBetter=true && continue
 
             done
 
