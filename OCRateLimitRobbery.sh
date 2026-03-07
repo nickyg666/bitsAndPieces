@@ -17,8 +17,6 @@
 # I hope nobody important at opencode/MiniMax sees this, eventually I will have to get craftier to escape them.
 # You can background it or put a nohup in your .bashrc or however you like to run it, up to you.
 u="$(logname)"
-sudo setcap cap_sys_admin,cap_net_admin+ep /usr/bin/ip
-sudo setcap cap_sys_admin,cap_net_admin+ep /usr/bin/nsenter
 # CHANGE BELOW TO ADAPT TO YOUR SETUP #
 
 ns="opencode" #the namespace you set up to hide opencode in
@@ -38,7 +36,7 @@ wgDN="$netns wg-quick down"
 
 # we will check for or set up a separate namespace for you quick - so we can hide real good without hiding everything all at once
 if ! sudo ip netns list | grep -q "^$ns"; then
-#setup namespace for vlan sorta thing
+#setup namespace for vlan sorta thing - I'm still learning about namespaces but they're pretty cool.
     sudo ip netns add $ns;
 
 #fix dns!
@@ -46,7 +44,6 @@ if ! sudo ip netns list | grep -q "^$ns"; then
         sudo mkdir -p /etc/netns/$ns
         echo "nameserver 1.1.1.1" | sudo tee /etc/netns/$ns/resolv.conf
     fi
-    #sudo chown ""$u":"$u"" /var/run/netns/$ns
     sudo ip link add veth-host type veth peer name veth-ns;
     sudo ip link set veth-ns netns $ns;
     sudo ip addr add 123.123.123.1/24 dev veth-host
