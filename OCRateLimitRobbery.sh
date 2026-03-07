@@ -1,5 +1,6 @@
 #!/bin/bash
-#TODO: fix routing, I forgot to add in the routing, so you don't get any DNS in that namespace.
+
+#todo: fix duplication issue where we hide in the same place 2x because my logic is messy for if here then go there
 
 # This is not super ethical - but neither is automating away peoples' jobs, etc.
 # so without further ado,
@@ -10,49 +11,67 @@
 # this is built to play nicely with systemd/resolved and the rest of your system
 # that you may or may not want to be tunnelled.
 # make sure you put this in your .bashrc to replace the export PATH=".opencode/bin/opencode"
-# alias opencode='nsenter --net=/var/run/netns/opencode ~/.opencode/bin/opencode'
+# alias opencode='sudo ip netns exec opencode sudo -u services /home/services/.opencode/bin/opencode'
 # actually, I will just do all of that for you - since this is likely only for me anyway.
 # This is dual-action for me; it helps my openvpn access server work alongside wireguard and also circumvent rate limiting with opencode.
 # I hope nobody important at opencode/MiniMax sees this, eventually I will have to get craftier to escape them.
-# You can daemonize it or put a nohup in your .bashrc or however you like to run it, up to you.
+# You can background it or put a nohup in your .bashrc or however you like to run it, up to you.
 u="$(logname)"
 sudo setcap cap_sys_admin,cap_net_admin+ep /usr/bin/ip
 sudo setcap cap_sys_admin,cap_net_admin+ep /usr/bin/nsenter
 # CHANGE BELOW TO ADAPT TO YOUR SETUP #
 
-
-oc_lives_here="/home/$u/.opencode/bin/opencode"
-where="/etc/netns/opencode/wireguard" # this is where your WG configs live. I would put them in the ns
 ns="opencode" #the namespace you set up to hide opencode in
-logs="/home/$u/.local/share/opencode/log" # where your logs are going, typically $user/.local/share/opencode/log
+oc_inst_dir="/home/services/.opencode/bin/opencode"
+where="/etc/wireguard" # this is where your WG configs live. I would put them in the ns
+logs="/home/services/.local/share/opencode/log" # where your logs are going, typically $user/.local/share/opencode/log
+shopt -s nullglob
 places=("$where"/*.conf) # name the configs after their locations, so you can remember which is where
-netns="nsenter --net=/var/run/netns/$ns"
+netns="sudo ip netns exec $ns"
+# this works for wgup so bashify it:
+#sudo ip netns exec opencode sudo wg-quick up /etc/netns/opencode/wireguard/atl.conf
+sudo cp -r /etc/wireguard/ /etc/netns/$ns/;
+
+
 wgUP="$netns wg-quick up" # you need to use wireguard in THE NAMESPACE ONLY
 wgDN="$netns wg-quick down"
 
 # we will check for or set up a separate namespace for you quick - so we can hide real good without hiding everything all at once
 if ! sudo ip netns list | grep -q "^$ns"; then
+#setup namespace for vlan sorta thing
+    sudo ip netns add $ns;
 
-    sudo ip netns add $ns
-    sudo chown "$u":"$u" /var/run/netns/$ns
-    sudo ip link add veth-host type veth peer name veth-ns
-    sudo ip link set veth-ns netns $ns
+#fix dns!
+    if ! [[ -f /etc/netns/$ns/resolv.conf ]]; then
+        sudo mkdir -p /etc/netns/$ns
+        echo "nameserver 1.1.1.1" | sudo tee /etc/netns/$ns/resolv.conf
+    fi
+    #sudo chown ""$u":"$u"" /var/run/netns/$ns
+    sudo ip link add veth-host type veth peer name veth-ns;
+    sudo ip link set veth-ns netns $ns;
     sudo ip addr add 123.123.123.1/24 dev veth-host
     $netns ip addr add 123.123.123.2/24 dev veth-ns
+#iface bringup
     $netns ip link set lo up
-    $netns ip link set veth-ns up
     sudo ip link set veth-host up
+    $netns ip link set veth-ns up
+#add routing/TABLES so we can go places
     $netns ip route add default via 123.123.123.1
     sudo ip route add 123.123.123.0/24 dev veth-host
-
+    sudo sysctl -w net.ipv4.ip_forward=1
+    sudo iptables -t nat -C POSTROUTING -s 123.123.123.0/24 -o enp0s3 -j MASQUERADE 2>/dev/null || \
+    sudo iptables -t nat -A POSTROUTING -s 123.123.123.0/24 -o enp0s3 -j MASQUERADE
+    sudo iptables -A FORWARD -i veth-host -j ACCEPT
+    sudo iptables -A FORWARD -o veth-host -j ACCEPT
 fi
 
 
+if ! grep -q "^alias opencode=" "$HOME/.bashrc"; then
 
-OC_roaming="alias opencode='$netns $oc_lives_here'"
-grep -qxF "$OC_roaming" ~/.bashrc || echo -e "\n$OC_roaming" >> ~/.bashrc
+    OC_roaming="alias opencode='sudo ip netns exec opencode sudo -u services /home/services/.opencode/bin/opencode'"
+    echo -e "\n$OC_roaming" >> "$HOME/.bashrc"
 # you should be able to just do opencode command to always run in a separate namespace now.
-
+fi
 
 for hidden in "${places[@]}"; do
     placeToGo="$hidden"
@@ -77,37 +96,37 @@ else
 
 fi
 #log watcher
-tail -Fn0 "$logs"/*.log 2>/dev/null | while read -r line; do
-    if echo "$line" | grep -qiE "rate limit|quota|exceeded|too many|retrying"; then
+tail -Fn0 "$logs"/*.log 2>stdout | while read -r line; do
+    if [[ "$line" =~ rate\ limit|quota|exceeded|too\ many|retrying ]]; then
 
         if [[ "$hidingIn" == "PlainSight" ]]; then
 
             hideBetter=true
             $wgUP "${places[0]}" # up the first config after you get rate limited!
-            hidingIn="$(basename "${places[0]}")"
+            hidingIn="${places[0]}"
             hideBetter=false
 
         else
 
-            $wgDN "$where/$hidingIn" # we must already be hiding, leave for the next spot!
+            $wgDN "$hidingIn" # we must already be hiding, leave for the next spot!
             hideBetter=true #we don't need to hide better if it\'s working, but if the log rate limits and ! hiding == plainsight then we must hide better
             for x in "${places[@]}"; do
 
                 if [[ "$hideBetter" == true ]]; then
 
                     $wgUP "$x";
-                    hidingIn="$(basename "$x")";
+                    hidingIn="$x";
                     hideBetter=false
                     break;
                 fi
 
-                [[ "$(basename "$x")" == "$hidingIn" ]] && hideBetter=true && continue
+                [[ "$x" == "$hidingIn" ]] && hideBetter=true && continue
 
             done
 
         fi
 
-        echo "I'm hiding in $hidingIn now";
+        echo "I'm hiding in $(basename "$hidingIn") now";
 
     fi
 
