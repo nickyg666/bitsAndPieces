@@ -1,0 +1,65 @@
+Hello!
+
+The purpose of this document is to record my AI assisted work in reverse engineering the I8 mini keyboard as found here: "https://www.aliexpress.us/item/3256805287334356.html?spm=a2g0o.order_list.order_list_main.5.5d541802ACjW9S&gatewayAdapt=glo2usa"
+The purpose of reverse engineering it - is that you get a lot of hardware for basically no money versus something like the cardKB or solderparty's BB keyboard. Plus, it's a lot more fun to steal trade secrets than it is to buy an espressif or STM chip, right?
+The goal: steal the MCU's input data and use it in a way that was not intended - a GPIO keyboard+mouse.
+
+Like anything cheap and chinese, it uses all the industry secrets to keep costs down, so yours will probably come with an entirely different chipset even if you order that exact one from the same batch. 
+I have no doubt they are like snowflakes and no two are alike. I will try to give tips how to snoop out the good bits from different setups where I can.
+I got the AAA version on accident, but it still has the pads to put the battery pins on and a few unpopulated passives near the SOIC-14 keyboard encoder chip as well as a charge port (which does nothing haha).
+
+I started by tracing for continuity, and mapping all the GND and VCC points. This was very easy, as at least the GND pads were all labelled. There was a JP1 location which had all the pins for USB (GND,DP,DM,VCC)
+but when I wired up a USB to it and plugged it in, of course the MCU is not equipped to provide a USB descriptor or actually be a USB device as it appears to be missing the USB PHY stuff needed to be that. 
+Okay, no problem I thought. I've seen plenty of articles where people have stolen the data pins from a shift register or muxer for the keyboard array. and boy, does this thing have so many keys for 4 USD.
+So I checked continuity between the SOIC-14 near the keyboard keys and the obvious QSOP-24 MCU. I discovered continuity between pin 2 of the SOIC-14 and pin 20 of the QSOP-24. 
+Pin 4 / SOIC-14 shared continuity with both VCC lines and pins 22 and 23 of the QSOP-24. It might be an SSOP, I'm not a package expert - but I can tell it is one of them due to the pitch difference in the pins compared to the SOIC-14,
+which I will refer to as the KEYBOARD ENCODER from here on out. The interesting part about this mapping, and what gave away that it was what I was after - was that there is a resistor at the MCU (the SSOP/QSOP-24 package) tying together 
+both of these pins right near the MCU with a low resistance. I'm still not sure what that rating was, at first it read 40Ohm but later it read 5 Ohm, but it gave me the raging clue that this was a data line (theory was helped by the two capacitors behind the resistor).
+Pin 11 of the keyboard encoder maps to GND as well as pin 13 of the MCU.
+
+Gemini and I initially devised that this pin 4 enc -> pins 22/23 MCU connection is some sort of proprietary half-duplex serial interface. 
+Interestingly enough, even though it appears there is a dedicated SOIC-16 package next to the touchpad that would control that matrix, I can see garbage printed when interacting with the touchpad over a serial connection with RX -> ENC pin 4 but only at high buad rates like 1500000 (1.5MB).
+There is a Fn+Space combo to control pointer speed, so maybe the half-duplex is used to echo data back for measurement of that? Don't know! But I do know, that I can reverse engineer that too eventually by reading high speed data from the KB encoder's pin 4.
+
+There are 5 test pads in the center of the board, which appear to map to pins 11,12,13 of the MCU as well as GND and uhh well I forget where that fifth one goes. It's not important to me - and you can continuity test many things to find out where they hide through vias and solder mask.
+I removed the springs where the AAA batteries should go to keep the back of the board flat, and took advantage of the GND and VCC pads for the batttery to power it over the SBC's 3.3v bus. this board appears to be able to handle 5v as well, but since the AAA version (should be) made to work on 2x1.5v AAA @ ~3V,
+I figured I should keep it close.
+
+The MCU's continuity map outside of what maps to the keyboard encoder seems to be the following:
+There is a 24MHZ crystal oscillator to the right of the MCU's pin 1. There are no markings on any of these chips either by the way, with the exception of the batch/datecode "C126819" on the MCU - useless.
+the timing crystal appears to map to pins 1+24, and pin 2 leads out to a 50ohm inline resistor which then leads to an F-pole onboard antenna for RF transmission. The board also supports bluetooth for data transmission.
+I was able to trace out pins 11 and 12 to the DP and DM pads at the edge of the board. I believe these test points are for factory validation of communication success with the dongle chipset they plan on shipping it with.
+I did end up soldering that dongle onboard to that location for convenience ( more on that later.)
+
+After I knew that pin 2 had to be some sort of CLK pin on the keyboard encoder to clock the data going over pin 4, I started trying to read out data from it. First I tried to get any UART from the DP/DM pins hoping I could trick the MCU into talking to me that way.
+Of course, no dice there. I thought maybe pins 2/4/11 on the keyboard encoder could be SPI, so I started probing for that. I didn't get anything. Then I hooked up my UART RX to pin 4, hoping to sniff some keypresses.
+When reading any baud rate of 8N1 serial, all I would get was garbage. So I began dumping the raw serial data with no kind of smartness at all to it, and finally got some 1's and 0's. it didn't make any sense though,
+I would press the A key, get a bunch of binary, release and get some more - and that made sense to me but upon trying to reproduce, it would shift the bits. I tried splitting it into 9 bit segments instead, and suddenly it was reproducible.
+I then had Gemini cook me up some more scripts to record the keypress signatures so I can make a serial keyboard out of it for my project, and also to sus out exactly how these two are talking. 
+
+it figured out that the hex values of these 9 or 11 bit blasts correspond to row masks and column indexes. Neat!
+
+I probably could have noticed the break code on my own, because it is the same 0xF0 for row and 0xE0 for columns every time.
+
+Now normally, we would just map the keyboard interactively with scripting, and then create a listener in C that sends the keypresses when it hears them. But wait - there's more! 
+This thing was built to use batteries, and efficiently at that! I initially wanted to capture the RF magic bits that the RF dongle sends to ACK the chip awake, but without a proper pinout and a real datasheet - it was more difficult than it had to be.
+If the MCU doesn't get an ACK beacon from the USB receiver or bluetooth, it kicks into deep sleep for power saving - disabling the output of keycodes from the encoder! Without those clock pulses on pin 2 of the KB encoder, we get nothing on pin 4. Allegedly I could have pulled pin 11
+of the KB encoder LOW to wake it natively, but I didn't want to risk frying it. Gemini hallucinates - A LOT and has caused me to release the magic smoke before.
+
+If you're going to use it, or any AI really, make sure you don't just believe it. Call its bluff CONSTANTLY, because it is likely full of it - often. But! for querying the internet deeply and identifying chips, Gemini seems to be the best free option. Plus, you can upload nearly unlimited photos for analysis and trace pathing.
+
+
+I ended up accepting the poorer way of keeping this device awakened without using up any USB ports that I don't have - by simply soldering it onboard to the test points JP1. It only needs power to send that ack that wakes it up, and additionally will save power consumption of the overall project - a nice  bonus!
+After shucking the USB shell it is very discrete anyway. 
+
+Gemini seems to have narrowed the chipset down based on what I have toned down to either a PAN2412 or some other QSOP-24 RF based chip like a sinowealth, panchip, or mosart. They all seem to have internal oscillators featured anyway, but for some reason they gave me a free 24 MHZ crystal. I'm thinking it is so it stays reliably synced to what the USB dongle is expecting on the other end.
+I will include my raw data reader in this repo, as well as the keymapper and future files for the implementation into the cyberdeck project. Happy cyber decking and reverse engineering to all of you out there.
+
+And remember - whether you think you can or you think you can't do something - you don't ever know unless you keep trying. Sometimes you might not know why you are even trying anymore. In these times, ask yourself - why did that guy make a disposable vape a web server? Why did some person make a desktop run on hundreds of AA batteries? Why do anything?
+
+AND ALWAYS HAVE FUN WITH IT - LIFE IS WORK BUT THAT DOESN'T MEAN IT HAS TO SUCK!
+
+<--- Below is the accurate bits of what Gemini had to say about the project. its long horizon context is sort of impressive --->
+
+Slicing the bitstream exactly at the active low-to-high sequence start marker 1101 reveals the following reproducible multi-byte scancode layout:Key-Down Events: Emit an unshifted 2-byte frame mapping row blocks and column bits:0x0C 0x0B → Captured during a Q keypress event.0x0C 0x00 → Captured during a W keypress event.0x0C 0x0F → Captured during an E keypress event.Key-Up / Release Flags: Emits a fixed Break Code frame pattern matching legacy 8051-microcontroller architectures:0xF0 0xE0 → Captured the instant an active key intersection matrix falls open.
+
