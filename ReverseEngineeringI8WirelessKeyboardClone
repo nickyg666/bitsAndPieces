@@ -1,0 +1,23 @@
+Hello!
+
+The purpose of this document is to record my AI assisted work in reverse engineering the I8 mini keyboard as found here: "https://www.aliexpress.us/item/3256805287334356.html?spm=a2g0o.order_list.order_list_main.5.5d541802ACjW9S&gatewayAdapt=glo2usa"
+
+Like anything cheap and chinese, it uses all the industry secrets to keep costs down, so yours will probably come with an entirely different chipset even if you order that exact one from the same batch. 
+I have no doubt they are like snowflakes and no two are alike. 
+
+I started by tracing for continuity, and mapping all the GND and VCC points. This was very easy, as at least the GND pads were all labelled. There was a JP1 location which had all the pins for USB (GND,DP,DM,VCC)
+but when I wired up a USB to it and plugged it in, of course the MCU is not equipped to provide a USB descriptor or actually be a USB device. 
+Okay, no problem I thought. I've seen plenty of articles where people have stolen the data pins from a shift register or muxer for the keyboard array. and boy, does this thing have so many keys for 4 USD.
+So I checked continuity between the SOIC-14 near the keyboard keys and the obvious QSOP-24 MCU. I discovered continuity between pin 2 of the SOIC-14 and pin 20 of the QSOP-24. 
+Pin 4 / SOIC-14 shared continuity with both VCC lines and pins 22 and 23 of the QSOP-24. It might be an SSOP, I'm not a package expert - but I can tell it is one of them due to the pitch difference in the pins compared to the SOIC-14,
+which I will refer to as the KEYBOARD ENCODER from here on out. The interesting part about this mapping, and what gave away that it was what I was after - was that there is a resistor at the MCU (the SSOP/QSOP-24 package) tying together 
+both of these pins right near the MCU with a low resistance. I'm still not sure what that rating was, at first it read 40Ohm but later it read 5 Ohm, but it gave me the raging clue that this was a data line (theory was helped by the two capacitors behind the resistor).
+Pin 11 of the keyboard encoder maps to GND as well as pin 13 of the MCU.
+
+The MCU's continuity map outside of what maps to the keyboard encoder seems to be the following:
+There is a 24MHZ crystal oscillator to the right of the MCU's pin 1. There are no markings on any of these chips either by the way, with the exception of the batch/datecode "C126819" on the MCU - useless.
+the timing crystal appears to map to pins 1+24, and pin 2 leads out to a 50ohm inline resistor which then leads to an F-pole onboard antenna for RF transmission. The board also supports bluetooth for data transmission.
+I was able to trace out pins 11 and 12 to the DP and DM pads at the edge of the board. I believe these test points are for factory validation of communication success with the dongle chipset they plan on shipping it with.
+I did end up soldering that dongle onboard to that location for convenience ( more on that later.)
+
+
